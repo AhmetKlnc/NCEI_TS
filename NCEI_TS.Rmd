@@ -1,0 +1,268 @@
+---
+title: "Time Series for NCEI"
+author: "Ahmet Kilinc"
+date: "2023-11-14"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+
+veriyi kaggle'den aldım, Londradaki heathrow havalimanına aittir,her gun icin yagis ve ortalama gunluk sicakliklari icerir.
+verinin kaynağı : https://www.kaggle.com/emafuma/ncei-heathrow-2010-2019
+
+
+
+```{r}
+options(warn=-1)
+library(readr)
+data <- read_csv("C:/Users/Ahmet/Desktop/Zaman serileri analizi/NCEI Heathrow Meteo Data 2010-2019.csv")
+View(data)
+```
+
+DATE: Veri setimizdeki ilgili tarih.
+TAVG: Veri setimizdeki ilgili ortalama sicaklik.
+PRCP: Veri setimizdeki yagis miktari.
+
+```{r}
+library(dplyr)
+library(fpp2)
+```
+
+veri setimizdeki date ve tavg degiskenini secerek, ilk 10 gozleme bakalim
+```{r}
+data<-data%>%select(c("DATE","TAVG"))
+head(data,10)
+```
+
+verimizin ozetine bakalim
+```{r}
+summary(data)
+```
+
+group_by komutu ile verimizin ilk sutunu olan "DATE" sutununu ay ve yil olarak ayirip verimize ayri sutunlar seklinde 
+ekleyelim ve aylik veri olarak tanimlayalim.
+```{r}
+data$Month<-lubridate::month(data$DATE)
+data$Year<-lubridate::year(data$DATE)
+datamonthly <- data%>%group_by(Year,Month)%>%summarise(TAVG = mean(TAVG))
+head(datamonthly,10)
+
+```
+
+yeni olusturdugumuz aylik verimizin özet haline bakalim
+```{r}
+summary(datamonthly)
+```
+
+verimizi ts komutuyla zaman serisine cevirelim, aylik verinin frekansi 12 olarak alinir.
+```{r}
+datamonthly<-ts(datamonthly[,3],start=c(2010,1),frequency =12)
+datamonthly
+
+```
+
+ts komutuyla verimiz zaman serisine cevrilmis mi class'ına bakarak test edelim
+```{r}
+class(datamonthly)
+```
+
+
+
+
+zaman serisi grafigi:
+```{r}
+autoplot(datamonthly) +
+  ggtitle("Aylik ortalama Hava Sicakliklari") +
+  xlab("Yil") +
+  ylab("Sicaklik")
+```
+  -Grafige gore mevsimsellik vardir fakat trendle ilgili kesin bir sey soyleyemeyiz.
+
+
+
+
+
+
+otokolerasyonu inceleme:
+```{r}
+ggAcf(datamonthly)
+```
+tum lagler mavi cizgiyi gectigi icin otokolerasyon vardır deriz
+birinci lag bize orijinal seriyle gecikmeli arasindaki otokolerasyonu gosterir ve cok yuksek gelmistir
+altinci lag ise ocak-haziran ın denk geldigi yerdir ve negatif otokolerasyon vardir deriz 
+cunku kisla yaz birbirine denk gelmektedir.
+
+
+```{r}
+length(datamonthly)/5
+```
+
+```{r}
+Box.test(datamonthly, lag=24, type = "Lj", fit=0)
+```
+H0; otokolerasyon yoktur  , H1;otokolerasyon vardir
+p degerim 0.05' ten kucuk geldigi icin H0 red edilir, anlamli otokolerasyon vardir deriz.
+
+
+
+
+
+mevsimsellik var midir?:
+```{r}
+ggseasonplot(datamonthly, year.labels=TRUE, year.labels.left=TRUE) +
+  ylab("Sicaklik") +
+  ggtitle("Seasonal Plot :Aylik Ortalama Hava Sicakliklari")
+```
+seasonplot grafigine bakarak her sene ayni hareketler oldugunu gormekteyiz bu da bize guclu mevsimsellik oldugunu gostermektedir.Her sene basi dusuk baslayip, sene ortasında yukselmis ve sene sonuna dogru sicaklik dususe gecmis.
+
+```{r}
+ggseasonplot(datamonthly,polar=TRUE, year.labels=TRUE, year.labels.left=TRUE) +
+  ylab("Sicaklik") +
+  ggtitle("Seasonal Plot :Aylik Ortalama Hava Sicakliklari")
+
+```
+bu grafik de aynı sekilde her senede ayni hareket oldugu goruluyor bundan dolayi guclu mevsimsellik vardir deriz.
+
+
+
+
+
+verimizi test ve train olarak ayiralim ve egitim seti uzerinden ortalama ve uygun gorulen naive modeli kuralim
+```{r}
+train<-window(datamonthly,end=c(2017,12))
+test<-window(datamonthly, start=2018)
+```
+
+egitim seti uzerinden ortalama ve naive modeli kuralim.
+```{r}
+model1<-meanf(train)
+model2<-snaive(train)
+
+```
+
+
+
+
+
+Kurduğumuz modellerin test seti ve train seti tahmin performanslarini grafik uzerinde gosterelim
+
+```{r}
+autoplot(datamonthly) +
+  autolayer(model1, series = "mean", PI=FALSE) + 
+  autolayer(model2, series = "seasonal naive", PI=FALSE) + 
+  autolayer(fitted(model1), series = "fitted model1") + 
+  autolayer(fitted(model2), series = "fitted model2")
+```
+
+
+
+
+
+kurduğumuz modellerin test seti ve training set üzerindeki rmse değerlerini bulalim
+```{r}
+accuracy(model1, test)
+```
+mean ile olusturdugumuz model1 icin:
+
+  training set rmse degeri --> 4.883399
+  
+  test set rmse degerimiz --> 5.870962
+
+
+```{r}
+accuracy(model2, test)
+```
+seasonal naive ile olusturdugumuz model2 icin: 
+  
+  training set rmse degeri --> 2.302965
+  
+  test set rmse degeri --> 1.789722
+
+
+
+RMSE ye ve diger metriklere baktigimizda  en dusuk degerli  sonuclari aldigimiz modelimiz Seasonal Naive yontemi kullanilarak olusturdugumuz model2 dir.
+
+
+
+kurduğumuz iki modelden test seti forcasting performansı daha iyi olan için model varsayımlarını kontrol edelim (normallik ve otokolerasyon)
+
+
+```{r}
+checkresiduals(model2)
+```
+ 1. Grafige baktigimizda artiklar 0 etrafinda rastgele dagilmaktadir.Bu grafikte trend gozlenmemektedir.
+ 
+ 2. Grafige baktigimizda laglerden bazilari mavi sinir cizgisini gectigi icin artiklarin otokorelasyon problemi vardir. Her bir gecikmeli icin ayri ayri        hipotez testi yapilmalidir.Portmanteau Testleri olan Box-Pierce ve Ljung-Box ile otokorelasyon kontrolu yapariz.
+ 
+ 3. Grafik Artiklarin Normal Dagilim Grafigidir.Grafige baktigimizda artiklar normal dagiliyor gibi gozukmemektedir, normallik testi grafigimizden daha          guvenilir oldugu icin normalligi test etmemiz gerekmektedir. Gozlem sayisimiz 50 nin uzerinde oldugu icin Kolmogorov-Smirnov Testi ile normallige            bakalim.
+   
+   Checkresiduals kodumuzdaki Ljung-Box test sonucumuza gore kullanilan toplam gecikme sayisi(lag) 19 cikmistir.
+
+
+
+
+Otokorelasyon icin portmanteau testlerini uygulayalim
+
+H0:Beyaz gurultu serisidir.(Otokorelasyon problemi yoktur.)
+
+H1:Beyaz gurultu serisi degildir.(Otokorelasyon problemi vardir.)
+
+
+
+Box-Pierce testini uygulayalim:
+```{r}
+Box.test(residuals(model2),lag=10, fitdf=0)
+```
+Box-Pierce testimizin P-value degerimiz 0.05 den kucuk oldugu icin H0 hipotezi red edilir yani seri beyaz gurultu serisi degildir otokorelasyon problemi vardir.
+
+
+Ljung-Box testini uygulayalim:
+```{r}
+Box.test(residuals(model2),lag=10, fitdf=0, type="Lj")
+```
+Ljung-Box testimizde P-value degerimiz 0.05 den kucuk oldugu icin H0 hipotezi red edilir yani seri beyaz gurultu serisi degildir otokorelasyon problemi vardir.
+
+
+
+Şimdi normallik varsayimini kontrol edelim...
+
+
+
+Normallik varsayimi kontrolu icin Kolmogorov-Smırnov testi uygulayalim :
+
+H0:Artiklarin dagilimi normaldir.
+H1:Artiklarin dagilimi normal degildir.
+```{r}
+x<-na.omit(residuals(model2))
+ks.test(x,"pnorm", mean=mean(x), sd=sd(x))
+```
+
+P-value degerimiz 0.9843 cıkmıstır. P-value degeri 0.05 den buyuk oldugu icin H0 hipotezi reddedilmez yani artiklarin dagilimi normaldir.
+
+
+
+
+
+test seti forcasting performansı daha iyi olan modeli uygun lambda değerini belirleyip box-cox dönüşümü yaparak kuralım, bu kurduğumuz modelin test seti rmse değerine bakalim
+
+```{r}
+lambda <- BoxCox.lambda(train)
+model3 <- snaive(train, lambda = lambda, h = 24, biasadj = TRUE)
+```
+
+
+```{r}
+accuracy(model3, test)
+```
+Box-cox donusumu yaparak kurdugumuz modelin test seti uzerindeki RMSE degeri 3.243112 dir.
+
+
+
+
+
+
+
+
+
+
